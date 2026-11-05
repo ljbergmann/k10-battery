@@ -28,6 +28,7 @@ K10 Battery fixes that with two parts:
 - [Limitations and caveats](#limitations-and-caveats)
 - [Privacy](#privacy)
 - [Repository layout](#repository-layout)
+- [Related work](#related-work)
 - [License](#license)
 
 ---
@@ -266,6 +267,18 @@ firmware/
 tools/
   k10-battery-probe.swift   troubleshooting probe
 ```
+
+---
+
+## Related work
+
+- **[bkovacev/keychron-macos](https://github.com/bkovacev/keychron-macos)** solves the same problem for the K10 Pro and K/Q Pro boards, independently and earlier. Its [research notes](https://github.com/bkovacev/keychron-macos/blob/main/docs/RESEARCH.md) are an excellent deep dive into the CKBT51 and the macOS power-source registry. It differs from K10 Battery in a few ways:
+  - it sends the level as an unassigned *Consumer* usage instead of reserved keyboard usages;
+  - it also reads exact voltage over the cable via raw HID;
+  - it adds backlight control from macOS.
+
+  If you want those features, have a look.
+- **[thementalcoding/keychron-pro-firmware](https://github.com/thementalcoding/keychron-pro-firmware)**: community Bluetooth reliability fixes for CKBT51 Pro boards (not battery related).
 
 ---
 
