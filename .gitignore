@@ -1,0 +1,4 @@
+firmware/.qmk/
+firmware/build/
+app/*.app
+.DS_Store
