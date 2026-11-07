@@ -6,7 +6,7 @@ APP="K10 Battery.app"
 rm -rf "$APP" && mkdir -p "$APP/Contents/MacOS"
 cp Info.plist "$APP/Contents/"
 swiftc -O -swift-version 5 -target arm64-apple-macos14.0 \
-  -framework IOKit -framework SwiftUI -framework ServiceManagement -framework UserNotifications \
+  -framework IOKit -framework SwiftUI -framework ServiceManagement -framework UserNotifications -framework Charts \
   Sources/*.swift -o "$APP/Contents/MacOS/K10Battery"
 # Sign with an Apple Development identity if one exists, so the Input Monitoring
 # permission survives rebuilds (ad-hoc signatures change with every build).

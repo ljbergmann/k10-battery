@@ -37,12 +37,14 @@ K10 Battery fixes that with two parts:
 
 | Keyboard | Layout / backlight | USB Product ID | Status |
 |---|---|---|---|
-| K10 Pro | ISO, RGB | `0x02A1` | ✅ **Tested on hardware** |
+| K10 Pro | ISO, RGB | `0x02A1` | ✅ **Tested on hardware** (firmware v1.0 protocol; see note) |
 | K10 Pro | ANSI, RGB | `0x02A0` | Builds; not yet tested on hardware |
 | K10 Pro | JIS, RGB | `0x02A2` | Builds; not yet tested on hardware |
 | K10 Pro | ANSI, white | `0x02A3` | Builds; not yet tested on hardware |
 | K10 Pro | ISO, white | `0x02A4` | Builds; not yet tested on hardware |
 | K10 Pro | JIS, white | `0x02A5` | Builds; not yet tested on hardware |
+
+> **Firmware status:** the current firmware adds voltage, on-demand readings and a key-state fix on top of the hardware-tested v1.0 protocol. It **builds for all variants but hasn't been flashed on a keyboard yet**. If you try it, please [report how it went](../../issues). The app works with both firmware versions.
 
 Not sure which one you have? On your Mac, open  → **About This Mac** → **More Info…** → **System Report** → **Bluetooth** (or **USB** when connected by cable) and look for *Keychron K10 Pro* and its **Product ID**.
 
@@ -77,16 +79,23 @@ Not sure which one you have? On your Mac, open  → **About This Mac** → **Mor
 | 1 | `0xDF` / `0xDE` | marker: on battery / USB power connected (charging) |
 | 2 | `0xA5` + tens | tens digit (0–10) |
 | 3 | `0xA5` + units | units digit (0–9) |
+| 4–6 | `0xA5` + digit | battery voltage: three base-11 digits `d`, where mV = 3000 + 2·d (all `00` with firmware v1.0) |
 
-For example, 68% on battery is sent as `DF AB AD`.
+For example, 68% at 3.846 V on battery is sent as `DF AB AD A8 AA AA`.
 
-The firmware sends this only **over Bluetooth**, only when **no key is held**, and only if you've typed **in the last 5 minutes**, so it never keeps the keyboard awake on its own.
+After ~30 ms the firmware re-sends your **real key state** (not just "all released"), so a key you happen to press in that moment is never cut short.
+
+**When it's sent:**
+- **while you type:** every 60 s, but only **over Bluetooth**, only when **no key is held**, and only if you've typed **in the last 5 minutes**. It never keeps the keyboard awake on its own.
+- **on request:** when the app switches the keyboard's (unused) **Kana LED** from off to on. The LED state reaches the keyboard over Bluetooth, and the firmware answers right away. The app asks on launch, on connect, after the Mac wakes, when you open its menu, and when you click ↻.
 
 **The Mac side.** The app opens the K10 through IOKit HID (that's why it needs the *Input Monitoring* permission) and looks only for that exact pattern. It then:
 
-- shows the level in the **menu bar**, with a median of the last 5 readings to smooth out voltage jitter;
+- converts the voltage to a percentage with a typical **Li-ion discharge curve**. Keychron's firmware uses a straight line, which reads too high in the lower half. Readings are smoothed with a median of the last 5;
+- shows the level in the **menu bar**, greyed out while the keyboard is disconnected;
 - registers a Bluetooth **accessory power source** with macOS (`IOPSCreatePowerSource`), the same mechanism that puts the MX Master and AirPods into Apple's **Batteries widget** and into `pmset -g accps`;
-- sends a **notification at 15%**.
+- keeps a 30-day **history**, learns your **discharge rate** from it, and estimates the **time left**;
+- sends **notifications** at 15% and when charging reaches 100%.
 
 ---
 
@@ -193,9 +202,14 @@ pmset -g accps
 
 ## Using it
 
-- **Menu bar:** keyboard icon, battery icon and percentage; a ⚡ means charging. Click it for details: connection, level, when it was last updated, a launch-at-login switch, and Quit.
-- **Batteries widget:** lists *Keychron K10 Pro* while the keyboard is connected and the app is running.
-- **Low battery:** a notification at **15%** (once per discharge).
+- **Menu bar:** keyboard icon, battery icon and percentage; a ⚡ means charging. While the keyboard is away it's **greyed out** and shows the last known level. Click it for details:
+  - level, voltage and when it was last updated (plus Keychron's own estimate when it differs by 5 points or more);
+  - **estimated time left**: needs at least 3 hours and a 3% drop since the last charge before it appears;
+  - a **7-day history chart**;
+  - ↻ to ask the keyboard for a fresh reading right now;
+  - *Show in Batteries widget while asleep* (off by default) and *Launch at login*.
+- **Batteries widget:** lists *Keychron K10 Pro* while the keyboard is connected and the app is running, including the time left (`pmset -g accps` shows it too). It disappears when the keyboard disconnects, unless *Show in Batteries widget while asleep* is on.
+- **Notifications:** at **15%** (once per discharge), and when charging reaches **100%**.
 - **Charging:** plug in the cable *while the switch is on Bluetooth* and the level shows as charging. On **Cable** mode the keyboard is a USB keyboard and no battery is reported.
 - **Idle:** after ~5 minutes without typing, the keyboard stops sending (to save battery). The app keeps the last value and shows how old it is; the next reading comes shortly after you start typing again.
 - **Fn + B** on the keyboard still works as before.
@@ -233,12 +247,12 @@ pmset -g accps
 
 ## Limitations and caveats
 
-- **Approximate level.** The percentage comes from Keychron's own voltage-based estimate, the same one Fn + B uses. It moves in steps and depends on the backlight load.
-- **Updates once a minute, only while typing.** This is by design, to avoid waking the keyboard.
+- **Approximate level.** It comes from the voltage, which the firmware measures and compensates for backlight load. The Li-ion curve hasn't been calibrated on a real K10 discharge yet; it agrees with Fn + B at the full and empty ends but reads lower in between. The time-left estimate depends on how you use the keyboard and settles after a few days of history.
+- **Updates once a minute while typing, or on request.** This is by design, to avoid waking the keyboard.
 - **Keychron firmware updates remove it.** Re-flash K10 Battery after installing an official update.
 - **Uses an undeclared macOS API.** `IOPSCreatePowerSource` is exported by IOKit and documented in `IOPSKeys.h`, but its prototype isn't in the public headers. A future macOS could change it; the menu bar display would keep working.
 - **Reserved HID usages.** macOS has no mapping for them and ignores them; this was confirmed on macOS 27.2. Other systems (Windows, Linux, iPadOS) and remapping tools such as Karabiner-Elements haven't been tested.
-- **A key pressed within ~60 ms after a broadcast** may be released early by the follow-up release report. It's rare, and the next key event corrects it.
+- **Kana LED.** On-demand requests use the keyboard's Kana LED output, which the K10 doesn't use. If you use a Japanese input method that drives the Kana LED, a toggle may trigger an extra reading; that's harmless.
 
 ---
 
@@ -254,7 +268,8 @@ pmset -g accps
 ```
 app/
   Sources/            SwiftUI menu bar app
-    HIDBatteryReader.swift      reads & decodes the K10's HID reports
+    HIDBatteryReader.swift      reads & decodes the K10's HID reports, sends reading requests
+    BatteryMath.swift           Li-ion curve, discharge rate, history store
     BatteryModel.swift          smoothing, persistence, notifications, login item
     PowerSourcePublisher.swift  registers the keyboard with macOS (Batteries widget)
     App.swift                   menu bar UI
