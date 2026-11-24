@@ -126,6 +126,11 @@ final class BatteryModel: ObservableObject {
         } else if let start = BatteryMath.chargeStart(history) {
             // Just unplugged: learn the charge rate from what the battery really got.
             learnChargeRate(from: start, reached: shown)
+        } else if let prev = percent, !charging {
+            // On battery: the level can't fall faster than the keyboard can use
+            // power. After unplugging, the voltage sinks for ~30 min while the
+            // cell settles; that's not charge being used.
+            shown = BatteryMath.limitDrop(to: shown, from: prev, history: history)
         }
 
         percent = shown

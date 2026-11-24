@@ -89,6 +89,23 @@ enum BatteryMath {
         return p >= 100 ? 100 : min(99, Int(p.rounded()))
     }
 
+    /// Caps a drop in the shown level at 3x the usage rate (learned from the
+    /// raw voltage-based levels in the history, or the calibration prior),
+    /// over the active time since the shown level last changed. On battery the
+    /// level never rises, unless the voltage says so by more than 3 %.
+    static func limitDrop(to new: Int, from prev: Int, history: [BatterySample], now: Date = Date()) -> Int {
+        if new >= prev { return new - prev > 3 ? new : prev }
+        // start of the tail of on-battery samples showing `prev`
+        var i = history.count
+        while i > 0, !history[i - 1].charging, history[i - 1].percent == prev { i -= 1 }
+        guard i < history.count else { return prev }   // not in the history yet (5 min spacing): hold
+        var hours = 0.0
+        let times = history[i...].map(\.date) + [now]
+        for (x, y) in zip(times, times.dropFirst()) { hours += min(y.timeIntervalSince(x), activeGap) / 3600 }
+        let rate = max(dischargeRate(history, now: now) ?? 0, 1 / priorHoursPerPercent)
+        return max(new, prev - Int(3 * rate * hours))
+    }
+
     /// Hours of use left: learned rate, or the calibration prior until then.
     static func hoursLeft(percent: Int, history: [BatterySample]) -> Double {
         if let r = dischargeRate(history) { return Double(percent) / r }
