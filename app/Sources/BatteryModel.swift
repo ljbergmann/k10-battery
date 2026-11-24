@@ -148,9 +148,9 @@ final class BatteryModel: ObservableObject {
         }
         if charging || shown > Self.lowThreshold + 5 { warnedLow = false }
 
-        if charging && (firmwarePercent ?? 0) >= 100 && !notifiedFull {
+        if charging && shown >= 100 && !notifiedFull {   // the firmware says 100 % long before it is
             notifiedFull = true
-            notify("full", "Keychron K10 charged", "The keyboard reports 100%. You can unplug it.")
+            notify("full", "Keychron K10 charged", "It should be fully charged now. You can unplug it.")
         }
         if !charging { notifiedFull = false }
     }
