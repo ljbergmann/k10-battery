@@ -132,11 +132,11 @@ struct HistoryChart: View {
         let from = Date().addingTimeInterval(-7 * 86400)
         let recent = samples.filter { $0.date >= from }
         Chart(recent) { s in
-            LineMark(x: .value("Time", s.date), y: .value("Battery", s.percent))
+            LineMark(x: .value("Time", s.date), y: .value("Battery", s.level))
                 .interpolationMethod(.monotone)
                 .foregroundStyle(.green)
             if s.charging {
-                PointMark(x: .value("Time", s.date), y: .value("Battery", s.percent))
+                PointMark(x: .value("Time", s.date), y: .value("Battery", s.level))
                     .symbolSize(10)
                     .foregroundStyle(.yellow)
             }

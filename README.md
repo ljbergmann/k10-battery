@@ -91,10 +91,10 @@ After ~30 ms the firmware re-sends your **real key state** (not just "all releas
 
 **The Mac side.** The app opens the K10 through IOKit HID (that's why it needs the *Input Monitoring* permission) and looks only for that exact pattern. It then:
 
-- converts the voltage to a percentage with a typical **Li-ion discharge curve**. Keychron's firmware uses a straight line, which reads too high in the lower half. Readings are smoothed with a median of the last 5;
+- converts the voltage to a percentage with a **curve measured on a real K10 discharge** (see [Battery calibration](#battery-calibration)). Keychron's firmware uses a straight line, which reads far too high in the lower half: its "36 %" is really about 11 %. With the stock-compatible v1.0 firmware, Keychron's percentage is turned back into its voltage first, so the same curve applies. Readings are smoothed with a median of the last 5;
 - shows the level in the **menu bar**, greyed out while the keyboard is disconnected;
 - registers a Bluetooth **accessory power source** with macOS (`IOPSCreatePowerSource`), the same mechanism that puts the MX Master and AirPods into Apple's **Batteries widget** and into `pmset -g accps`;
-- keeps a 30-day **history**, learns your **discharge rate** from it, and estimates the **time left**;
+- keeps a 30-day **history**, learns your **discharge rate** per hour of use from it, and estimates the **time of use left**;
 - sends **notifications** at 15% and when charging reaches 100%.
 
 ---
@@ -245,9 +245,37 @@ pmset -g accps
 
 ---
 
+## Battery calibration
+
+Keychron's firmware maps voltage to percent with straight lines (4.10 V = 100 %, 3.50 V = 20 %, 3.30 V = 0 %). Real Li-ion cells don't discharge like that, so the level drops slowly at first and then collapses below "40 %".
+
+The curve in the app was measured with `tools/calibrate.py` on a K10 Pro ISO RGB, **backlight off**, over a discharge from 3.86 V until the keyboard switched itself off (58 h of active typing, about 86 h for a full charge). The idea: power draw per hour of use is roughly constant, so the real charge at any voltage is the share of typing time that was still left.
+
+| Voltage | Keychron | Measured |
+|---|---|---|
+| 3.84 V | 65 % | 63 % |
+| 3.78 V | 57 % | 44 % |
+| 3.72 V | 49 % | 29 % |
+| 3.66 V | 41 % | 20 % |
+| 3.60 V | 33 % | 11 % |
+| 3.51 V | 21 % | 6 % |
+| 3.42 V | 12 % | 3 % |
+
+Above 3.84 V the run had no data, so the generic Li-ion curve is used there. **With the backlight on** the keyboard uses several times more power, so the hours are much shorter; the curve should still roughly hold, since the firmware corrects the voltage for backlight load. The time-left estimate learns your actual rate either way.
+
+To calibrate your own keyboard, use it on battery until it switches off, then run:
+
+```bash
+python3 tools/calibrate.py
+```
+
+It reads the app's history and prints a table to paste into `app/Sources/BatteryMath.swift`. A run that starts from a full charge gives the most accurate result.
+
+---
+
 ## Limitations and caveats
 
-- **Approximate level.** It comes from the voltage, which the firmware measures and compensates for backlight load. The Li-ion curve hasn't been calibrated on a real K10 discharge yet; it agrees with Fn + B at the full and empty ends but reads lower in between. The time-left estimate depends on how you use the keyboard and settles after a few days of history.
+- **Approximate level.** It comes from the voltage, which the firmware measures and compensates for backlight load. The curve was calibrated on one keyboard with the backlight off (see [Battery calibration](#battery-calibration)). It agrees with Fn + B at the full and empty ends but reads lower in between. The time-left estimate starts from the calibration run and then learns from your own use within a few hours.
 - **Updates once a minute while typing, or on request.** This is by design, to avoid waking the keyboard.
 - **Keychron firmware updates remove it.** Re-flash K10 Battery after installing an official update.
 - **Uses an undeclared macOS API.** `IOPSCreatePowerSource` is exported by IOKit and documented in `IOPSKeys.h`, but its prototype isn't in the public headers. A future macOS could change it; the menu bar display would keep working.
@@ -259,7 +287,7 @@ pmset -g accps
 ## Privacy
 
 - The app reads input reports **from the K10 Pro only**, and only to find the battery pattern described above. Key data is **never stored, logged or transmitted**. The app has no network code.
-- It stores just the last level, charging state and timestamp (in `~/Library/Preferences/local.k10battery.plist`).
+- It stores just the last level, charging state and timestamp (in `~/Library/Preferences/local.k10battery.plist`) and a 30-day battery history (level, voltage, time) in `~/Library/Application Support/K10 Battery/history.json`.
 
 ---
 
@@ -269,7 +297,7 @@ pmset -g accps
 app/
   Sources/            SwiftUI menu bar app
     HIDBatteryReader.swift      reads & decodes the K10's HID reports, sends reading requests
-    BatteryMath.swift           Li-ion curve, discharge rate, history store
+    BatteryMath.swift           calibrated curve, discharge rate, history store
     BatteryModel.swift          smoothing, persistence, notifications, login item
     PowerSourcePublisher.swift  registers the keyboard with macOS (Batteries widget)
     App.swift                   menu bar UI

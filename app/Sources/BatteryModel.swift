@@ -37,7 +37,7 @@ final class BatteryModel: ObservableObject {
             if defaults.object(forKey: "millivolts") != nil { millivolts = defaults.integer(forKey: "millivolts") }
         }
         history = store.samples
-        hoursLeft = BatteryMath.dischargeRate(history).flatMap { r in percent.map { Double($0) / r } }
+        hoursLeft = (percent != nil && !charging) ? BatteryMath.hoursLeft(percent: percent!, history: history) : nil
 
         reader.onReading = { [weak self] r in MainActor.assumeIsolated { self?.apply(r) } }
         reader.onConnectionChange = { [weak self] c in MainActor.assumeIsolated { self?.connectionChanged(c) } }
@@ -95,9 +95,11 @@ final class BatteryModel: ObservableObject {
         } else {
             millivolts = nil
         }
-        // On battery with voltage: use the Li-ion curve. Charging voltage is
-        // inflated by the charger, so there we show the firmware's own value.
-        let shown = (!r.charging && millivolts != nil) ? BatteryMath.percent(millivolts: millivolts!) : firmwarePercent!
+        // On battery: calibrated curve, from the voltage or (firmware v1.0)
+        // from Keychron's percentage turned back into its voltage. Charging
+        // voltage is inflated by the charger, so there we show the firmware's value.
+        let mv = millivolts ?? BatteryMath.millivolts(keychronPercent: firmwarePercent!)
+        let shown = r.charging ? firmwarePercent! : BatteryMath.percent(millivolts: mv)
 
         percent = shown
         charging = r.charging
@@ -108,9 +110,9 @@ final class BatteryModel: ObservableObject {
         defaults.set(lastUpdate, forKey: "lastUpdate")
         if let mv = millivolts { defaults.set(mv, forKey: "millivolts") } else { defaults.removeObject(forKey: "millivolts") }
 
-        store.add(BatterySample(date: Date(), percent: shown, millivolts: millivolts, charging: r.charging))
+        store.add(BatterySample(date: Date(), percent: shown, millivolts: mv, charging: r.charging))
         history = store.samples
-        hoursLeft = r.charging ? nil : BatteryMath.dischargeRate(history).map { Double(shown) / $0 }
+        hoursLeft = r.charging ? nil : BatteryMath.hoursLeft(percent: shown, history: history)
         refreshPowerSource()
 
         if !charging && shown <= Self.lowThreshold && !warnedLow {
@@ -175,6 +177,6 @@ final class BatteryModel: ObservableObject {
         let f = DateComponentsFormatter()
         f.allowedUnits = h >= 48 ? [.day, .hour] : [.hour, .minute]
         f.unitsStyle = .abbreviated; f.maximumUnitCount = 2
-        return f.string(from: h * 3600).map { "≈ \($0) left" }
+        return f.string(from: h * 3600).map { "≈ \($0) of use left" }
     }
 }

@@ -1,45 +1,63 @@
 import Foundation
 
 enum BatteryMath {
-    /// Typical resting discharge curve of a 1-cell Li-ion/LiPo (V -> %).
-    private static let curve: [(v: Double, p: Double)] = [
-        (3.30, 0), (3.61, 5), (3.69, 10), (3.71, 15), (3.73, 20), (3.75, 25),
-        (3.77, 30), (3.79, 35), (3.80, 40), (3.82, 45), (3.84, 50), (3.85, 55),
-        (3.87, 60), (3.91, 65), (3.95, 70), (3.98, 75), (4.02, 80), (4.08, 85),
-        (4.11, 90), (4.15, 95), (4.20, 100),
+    /// Voltage -> real charge, measured on a K10 Pro ISO RGB (backlight off)
+    /// by `tools/calibrate.py`: the real charge at each voltage is the share of
+    /// active typing time that was still left before the keyboard shut off.
+    /// Above 3.84 V (not covered by that run) the generic Li-ion curve is used.
+    /// Voltages are the firmware's load-compensated values.
+    private static let curve: [(mv: Double, p: Double)] = [
+        (3300, 0.0), (3330, 0.2), (3360, 1.2), (3390, 2.4), (3420, 3.2), (3450, 4.2),
+        (3480, 5.1), (3510, 6.2), (3540, 7.7), (3570, 9.0), (3600, 11.2), (3630, 14.3),
+        (3660, 20.3), (3690, 24.5), (3720, 29.2), (3750, 34.1), (3780, 43.9), (3810, 51.3),
+        (3840, 62.7), (3860, 67.5), (3900, 74.2), (3950, 80.9), (4000, 86.3), (4050, 94.2),
+        (4100, 100.0),
     ]
 
-    /// Percent from the firmware's (load-compensated) voltage.
-    /// Keychron's firmware treats 4.10 V as full and 3.30 V as shutdown, and
-    /// interpolates linearly in two segments. Here the standard curve shape is
-    /// mapped onto that same 3.30-4.10 V window, so the end points agree with
-    /// Fn+B but the middle follows the real (non-linear) cell behaviour.
+    /// Typing hours per 1 % from the calibration run (backlight off). Only a
+    /// starting value; the learned rate replaces it after a few hours of use.
+    static let priorHoursPerPercent = 0.86
+
     static func percent(millivolts mv: Int) -> Int {
-        let full = 4.10, empty = 3.30
-        // map firmware voltage into the curve's 3.30-4.20 V domain
-        let v = 3.30 + (Double(mv) / 1000 - empty) * (4.20 - 3.30) / (full - empty)
-        if v <= curve.first!.v { return 0 }
-        if v >= curve.last!.v { return 100 }
-        for i in 1..<curve.count where v <= curve[i].v {
+        let v = Double(mv)
+        if v <= curve.first!.mv { return 0 }
+        if v >= curve.last!.mv { return 100 }
+        for i in 1..<curve.count where v <= curve[i].mv {
             let a = curve[i - 1], b = curve[i]
-            return Int((a.p + (v - a.v) / (b.v - a.v) * (b.p - a.p)).rounded())
+            return Int((a.p + (v - a.mv) / (b.mv - a.mv) * (b.p - a.p)).rounded())
         }
         return 100
     }
 
-    /// Discharge rate in percent per hour from the current on-battery stretch
-    /// (least-squares slope). nil until there's enough data: at least 3 hours
-    /// and 3 points of drop since the last time it was charging.
+    /// Inverse of Keychron's battery_get_percentage(): 4.10 V = 100 %,
+    /// 3.50 V = 20 %, 3.30 V = 0 %, straight lines in between. Lets readings
+    /// from firmware without voltage (v1.0) use the calibrated curve too.
+    static func millivolts(keychronPercent p: Int) -> Int {
+        let p = Double(min(max(p, 0), 100))
+        return Int((p >= 20 ? 3500 + (p - 20) * 600 / 80 : 3300 + p * 200 / 20).rounded())
+    }
+
+    /// Gaps longer than this between samples count as "not in use".
+    static let activeGap: TimeInterval = 15 * 60
+
+    /// Discharge rate in percent per hour of *use* (least-squares slope over
+    /// active time, so nights and weekends don't count) for the current
+    /// on-battery stretch. nil until there are 3 active hours and 3 % of drop.
     static func dischargeRate(_ history: [BatterySample], now: Date = Date()) -> Double? {
         let lastCharge = history.lastIndex(where: { $0.charging })
-        let stretch = history[(lastCharge.map { $0 + 1 } ?? 0)...]
-            .filter { now.timeIntervalSince($0.date) < 14 * 86400 }
+        let stretch = Array(history[(lastCharge.map { $0 + 1 } ?? 0)...]
+            .filter { now.timeIntervalSince($0.date) < 14 * 86400 })
         guard let first = stretch.first, let last = stretch.last,
-              last.date.timeIntervalSince(first.date) >= 3 * 3600,
-              first.percent - last.percent >= 3 else { return nil }
+              first.level - last.level >= 3 else { return nil }
 
-        let xs = stretch.map { $0.date.timeIntervalSince(first.date) / 3600 }
-        let ys = stretch.map { Double($0.percent) }
+        var xs: [Double] = [0], t = 0.0
+        for (a, b) in zip(stretch, stretch.dropFirst()) {
+            let g = b.date.timeIntervalSince(a.date)
+            if g <= activeGap { t += g / 3600 }
+            xs.append(t)
+        }
+        guard t >= 3 else { return nil }
+        let ys = stretch.map { Double($0.level) }
         let n = Double(xs.count)
         let mx = xs.reduce(0, +) / n, my = ys.reduce(0, +) / n
         let sxx = zip(xs, xs).map { ($0 - mx) * ($1 - mx) }.reduce(0, +)
@@ -47,6 +65,12 @@ enum BatteryMath {
         guard sxx > 0 else { return nil }
         let slope = -sxy / sxx
         return slope > 0.01 ? slope : nil
+    }
+
+    /// Hours of use left: learned rate, or the calibration prior until then.
+    static func hoursLeft(percent: Int, history: [BatterySample]) -> Double {
+        if let r = dischargeRate(history) { return Double(percent) / r }
+        return Double(percent) * priorHoursPerPercent
     }
 }
 
@@ -56,6 +80,13 @@ struct BatterySample: Codable, Identifiable {
     let percent: Int
     let millivolts: Int?
     let charging: Bool
+
+    /// Calibrated level. Older samples stored Keychron's own percentage and
+    /// no voltage; those are converted. While charging, the firmware's value.
+    var level: Int {
+        if charging { return percent }
+        return BatteryMath.percent(millivolts: millivolts ?? BatteryMath.millivolts(keychronPercent: percent))
+    }
 }
 
 /// Persistent reading history (Application Support/K10 Battery/history.json),
