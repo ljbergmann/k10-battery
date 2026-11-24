@@ -37,14 +37,14 @@ K10 Battery fixes that with two parts:
 
 | Keyboard | Layout / backlight | USB Product ID | Status |
 |---|---|---|---|
-| K10 Pro | ISO, RGB | `0x02A1` | ✅ **Tested on hardware** (firmware v1.0 protocol; see note) |
+| K10 Pro | ISO, RGB | `0x02A1` | ✅ **Tested on hardware** |
 | K10 Pro | ANSI, RGB | `0x02A0` | Builds; not yet tested on hardware |
 | K10 Pro | JIS, RGB | `0x02A2` | Builds; not yet tested on hardware |
 | K10 Pro | ANSI, white | `0x02A3` | Builds; not yet tested on hardware |
 | K10 Pro | ISO, white | `0x02A4` | Builds; not yet tested on hardware |
 | K10 Pro | JIS, white | `0x02A5` | Builds; not yet tested on hardware |
 
-> **Firmware status:** the current firmware adds voltage, on-demand readings and a key-state fix on top of the hardware-tested v1.0 protocol. It **builds for all variants but hasn't been flashed on a keyboard yet**. If you try it, please [report how it went](../../issues). The app works with both firmware versions.
+> **Firmware status:** the current firmware (voltage, on-demand readings, key-state fix) was flashed and tested on a K10 Pro ISO RGB. The other variants build from the same code but haven't been tried on hardware. If you try one, please [report how it went](../../issues). The app also works with the earlier v1.0 firmware, which sent the percentage only.
 
 Not sure which one you have? On your Mac, open  → **About This Mac** → **More Info…** → **System Report** → **Bluetooth** (or **USB** when connected by cable) and look for *Keychron K10 Pro* and its **Product ID**.
 
@@ -91,7 +91,7 @@ After ~30 ms the firmware re-sends your **real key state** (not just "all releas
 
 **The Mac side.** The app opens the K10 through IOKit HID (that's why it needs the *Input Monitoring* permission) and looks only for that exact pattern. It then:
 
-- converts the voltage to a percentage with a **curve measured on a real K10 discharge** (see [Battery calibration](#battery-calibration)). Keychron's firmware uses a straight line, which reads far too high in the lower half: its "36 %" is really about 11 %. With the stock-compatible v1.0 firmware, Keychron's percentage is turned back into its voltage first, so the same curve applies. Readings are smoothed with a median of the last 5;
+- converts the voltage to a percentage with a **curve measured on a real K10 discharge** (see [Battery calibration](#battery-calibration)). Keychron's firmware uses a straight line, which reads far too high in the lower half: its "36 %" is really about 11 %. With the earlier v1.0 firmware, which sends no voltage, Keychron's percentage is turned back into its voltage first, so the same curve applies. **While charging**, the charger pushes the voltage up (the keyboard claims 59 % a quarter of an hour after shutting down empty), so the app estimates the level from the time since you plugged in instead. It starts at about 3 h for a full charge and learns your actual charge time from the real level after you unplug. Readings are smoothed with a median of the last 5;
 - shows the level in the **menu bar**, greyed out while the keyboard is disconnected;
 - registers a Bluetooth **accessory power source** with macOS (`IOPSCreatePowerSource`), the same mechanism that puts the MX Master and AirPods into Apple's **Batteries widget** and into `pmset -g accps`;
 - keeps a 30-day **history**, learns your **discharge rate** per hour of use from it, and estimates the **time of use left**;

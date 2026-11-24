@@ -1,6 +1,9 @@
 import AppKit
 import ServiceManagement
 import UserNotifications
+import os
+
+private let log = Logger(subsystem: "local.k10battery", category: "battery")
 
 @MainActor
 final class BatteryModel: ObservableObject {
@@ -27,6 +30,11 @@ final class BatteryModel: ObservableObject {
     private var warnedLow = false
     private var notifiedFull = false
     private let defaults = UserDefaults.standard
+    /// Learned from past charges (real level after unplugging); 3 h until then.
+    private var hoursPerFullCharge: Double {
+        get { let v = defaults.double(forKey: "hoursPerFullCharge"); return v > 0 ? v : 3.0 }
+        set { defaults.set(newValue, forKey: "hoursPerFullCharge") }
+    }
 
     init() {
         showWhileAsleep = defaults.bool(forKey: "showWhileAsleep")
@@ -75,7 +83,17 @@ final class BatteryModel: ObservableObject {
     /// Ask the keyboard for a reading right now (menu opened, wake, Refresh).
     func requestReading() { reader.requestReading() }
 
+    private func learnChargeRate(from start: BatteryMath.ChargeStart, reached level: Int) {
+        let hours = Date().timeIntervalSince(start.date) / 3600
+        let gained = Double(level - start.level)
+        guard hours >= 0.5, gained >= 20, level < 95 else { return }   // a full battery hides the real time
+        let measured = min(max(hours / (gained / 100), 1), 8)
+        hoursPerFullCharge = (hoursPerFullCharge + measured) / 2
+        log.notice("charge rate: \(String(format: "%.2f", measured)) h per full charge, now using \(String(format: "%.2f", self.hoursPerFullCharge))")
+    }
+
     private func connectionChanged(_ c: Bool) {
+        log.notice("keyboard \(c ? "connected" : "disconnected", privacy: .public)")
         connected = c
         refreshPowerSource()
         // A freshly connected keyboard needs a few seconds before its voltage is
@@ -99,7 +117,16 @@ final class BatteryModel: ObservableObject {
         // from Keychron's percentage turned back into its voltage. Charging
         // voltage is inflated by the charger, so there we show the firmware's value.
         let mv = millivolts ?? BatteryMath.millivolts(keychronPercent: firmwarePercent!)
-        let shown = r.charging ? firmwarePercent! : BatteryMath.percent(millivolts: mv)
+        var shown = BatteryMath.percent(millivolts: mv)
+        if r.charging {
+            // Time-based estimate; the firmware's value only if the plug-in level is unknown.
+            shown = BatteryMath.chargeStart(history).map {
+                BatteryMath.chargingLevel(from: $0, hoursPerFullCharge: hoursPerFullCharge)
+            } ?? firmwarePercent!
+        } else if let start = BatteryMath.chargeStart(history) {
+            // Just unplugged: learn the charge rate from what the battery really got.
+            learnChargeRate(from: start, reached: shown)
+        }
 
         percent = shown
         charging = r.charging

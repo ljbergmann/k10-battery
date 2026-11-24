@@ -22,7 +22,7 @@ IOHIDManagerRegisterDeviceMatchingCallback(m, { _, _, _, dev in
         let mk = rep[b + 2]
         if mk == 0xDE || mk == 0xDF {
             let pct = (Int(rep[b + 3]) - 0xA5) * 10 + (Int(rep[b + 4]) - 0xA5)
-            print(String(format: "%.0fs", Date().timeIntervalSince(t0)), "BATTERY REPORT: \(pct)% charging=\(mk == 0xDE) after \(total) reports")
+            print(String(format: "%.0fs", Date().timeIntervalSince(t0)), "BATTERY REPORT: \(pct)% charging=\(mk == 0xDE) after \(total) reports", "rid=\(rid) len=\(len)", (0..<Int(len)).map { String(format: "%02x", rep[$0]) }.joined(separator: " "))
             exit(0)
         }
     }, nil)

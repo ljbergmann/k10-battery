@@ -67,6 +67,28 @@ enum BatteryMath {
         return slope > 0.01 ? slope : nil
     }
 
+    /// While charging, the voltage is pushed up by the charger and says little
+    /// about the real charge (the firmware reported 59 % 16 min after empty).
+    /// So the level is estimated from time instead: level at plug-in plus
+    /// elapsed time, at `hoursPerFullCharge` for 0 -> 100 %. Returns the
+    /// plug-in point too, so the real level after unplugging can refine the rate.
+    struct ChargeStart { let date: Date; let level: Int }
+
+    static func chargeStart(_ history: [BatterySample]) -> ChargeStart? {
+        guard let last = history.last, last.charging else { return nil }
+        var i = history.count - 1
+        while i > 0 && history[i - 1].charging { i -= 1 }
+        // need the last on-battery reading shortly before plugging in
+        guard i > 0, history[i].date.timeIntervalSince(history[i - 1].date) < 2 * 3600 else { return nil }
+        return ChargeStart(date: history[i].date, level: history[i - 1].level)
+    }
+
+    static func chargingLevel(from start: ChargeStart, hoursPerFullCharge: Double, now: Date = Date()) -> Int {
+        let h = now.timeIntervalSince(start.date) / 3600
+        let p = Double(start.level) + h / hoursPerFullCharge * 100
+        return p >= 100 ? 100 : min(99, Int(p.rounded()))
+    }
+
     /// Hours of use left: learned rate, or the calibration prior until then.
     static func hoursLeft(percent: Int, history: [BatterySample]) -> Double {
         if let r = dischargeRate(history) { return Double(percent) / r }

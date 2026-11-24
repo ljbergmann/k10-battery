@@ -1,5 +1,8 @@
 import Foundation
 import IOKit.hid
+import os
+
+private let log = Logger(subsystem: "local.k10battery", category: "hid")
 
 /// Talks to the Keychron K10 Pro over IOKit HID:
 ///  - decodes the battery report the K10 Battery firmware sends as reserved
@@ -78,6 +81,8 @@ final class HIDBatteryReader {
     }
 
     private func attach(_ device: IOHIDDevice) {
+        let transport = IOHIDDeviceGetProperty(device, kIOHIDTransportKey as CFString) as? String ?? "?"
+        log.notice("attach \(transport, privacy: .public) (\(self.buffers.count) already open)")
         guard buffers[device] == nil else { return }
         productID = (IOHIDDeviceGetProperty(device, kIOHIDProductIDKey as CFString) as? Int) ?? productID
         let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: Self.bufferSize)
@@ -97,6 +102,7 @@ final class HIDBatteryReader {
     }
 
     private func detach(_ device: IOHIDDevice) {
+        log.notice("detach (\(self.buffers.count) open)")
         if let buf = buffers.removeValue(forKey: device) { buf.deallocate() }
         kanaElements.removeValue(forKey: device)
         onConnectionChange?(isConnected)
@@ -131,6 +137,7 @@ final class HIDBatteryReader {
         } else {
             return
         }
+        log.notice("battery report \(pct)% \(mv ?? 0) mV charging=\(marker == 0xDE)")
         onReading?(Reading(percent: pct, charging: marker == 0xDE, millivolts: mv))
     }
 }
